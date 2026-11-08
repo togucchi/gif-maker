@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: --bundles nsis
+          - platform: macos-latest # Apple Silicon runner
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles dmg
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Fetch FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/fetch-ffmpeg.ps1
+
+      - name: Fetch FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/fetch-ffmpeg.sh
+
+      - run: npm ci
+
+      - name: Rust tests (with real FFmpeg)
+        shell: bash
+        working-directory: src-tauri
+        run: |
+          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          GIF_MAKER_FFMPEG="$PWD/binaries/ffmpeg-${{ matrix.target }}$ext" cargo test --target ${{ matrix.target }} -- --include-ignored
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: GIF Maker ${{ github.ref_name }}
+          releaseBody: |
+            ## ダウンロード / Download
+            - **Windows (x64)**: `GIF.Maker_*_x64-setup.exe`
+            - **macOS (Apple Silicon)**: `GIF.Maker_*_aarch64.dmg`
+
+            macOS 版は未署名です。初回は「アプリケーション」へコピー後、ターミナルで次を実行してください。
+            The macOS build is not notarized. After copying it to Applications, run:
+            ```
+            xattr -cr "/Applications/GIF Maker.app"
+            ```
+            Windows で SmartScreen が表示された場合は「詳細情報」→「実行」を選んでください。
+            If SmartScreen appears on Windows, choose "More info" → "Run anyway".
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false

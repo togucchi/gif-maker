@@ -1,0 +1,36 @@
+[package]
+name = "gif-maker"
+version = "0.1.0"
+description = "Convert video clips to GIF"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/togucchi/gif-maker"
+rust-version = "1.80"
+
+[lib]
+name = "gif_maker_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+regex = "1"
+gifski = { version = "1.32", default-features = false, features = ["gifsicle"] }
+imgref = "1.10"
+rgb = "0.8"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
+
+# gifski / quantization are very slow unoptimized; keep dev builds usable.
+[profile.dev.package."*"]
+opt-level = 3
